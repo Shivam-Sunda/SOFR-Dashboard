@@ -4,3 +4,4 @@ numpy
 altair
 pyarrow
 openpyxl
+streamlit-local-storage
