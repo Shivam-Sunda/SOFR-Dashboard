@@ -2,7 +2,6 @@
 SOFR SR1 / SR3 Dashboard  –  v8
 Run:  streamlit run sofr_dashboard.py
 Excel:  date | sofr | icap | gc   (icap and gc optional)
-State:  sofr_state.json  (auto-created alongside script)
 
 Weekend handling: Excel contains ONLY business days. day_count for each
 business day is computed as the calendar gap to the NEXT business day
@@ -19,13 +18,13 @@ from datetime import date, timedelta
 import calendar, os, json
 import altair as alt
 import decimal as _dec
+from streamlit_local_storage import LocalStorage
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATHS & CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE  = os.path.join(BASE_DIR, "sofr_state.json")
 
 GSHEET_CSV_URL = (
     "https://docs.google.com/spreadsheets/d/"
@@ -66,7 +65,7 @@ def round_half_up(value: float, decimals: int) -> float:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CORE FUNCTIONS  — structure UNCHANGED; rounding added as post-step only
+# CORE FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_third_wednesday(year: int, month: int) -> date:
@@ -95,16 +94,6 @@ def calendar_gap_day_count(bd: date, next_bd) -> int:
     Computed as (next_business_day - current_business_day).days so that
     any weekend or holiday gap between two consecutive business days is
     automatically absorbed into the earlier day.
-
-    Examples:
-      Mon -> Tue  : gap = 1
-      Fri -> Mon  : gap = 3  (Fri + Sat + Sun)
-      Thu -> Mon  : gap = 4  (Thu + Fri + Sat + Sun, e.g. Easter Fri holiday)
-      last day    : gap = 1  (fallback)
-
-    This replaces the old hardcoded Friday=3 logic and correctly handles
-    month-start weekends: Feb 27 (Fri) -> Mar 2 (Mon) gives day_count=3,
-    so March 1 (Sun) is included in Feb 27's accrual.
     """
     if next_bd is None:
         return 1
@@ -115,16 +104,6 @@ def build_rate_series(start: date, end_excl: date,
                       actual_df: pd.DataFrame, forward_rate: float) -> pd.DataFrame:
     """
     Build business-day-only rate series with calendar-gap day counts.
-
-    Algorithm:
-      1. Enumerate all business days in [start, end_excl).
-      2. For each business day i:
-           day_count = next_business_day[i] - business_day[i]  (calendar days)
-         The last business day uses day_count = 1 (fallback).
-      3. This ensures every calendar day -- including weekends/holidays
-         between consecutive business days, or a month starting on a
-         weekend (e.g. March 1 Sun) -- is counted via the preceding
-         business day's day_count. No Saturday/Sunday rows are created.
     """
     lookup = actual_df.set_index("date")["rate"].to_dict()
     bds    = business_days(start, end_excl)
@@ -142,36 +121,17 @@ def compute_sr1(year: int, month: int,
                 actual_df: pd.DataFrame, forward_rate: float) -> dict:
     """
     SR1: simple average of SOFR over ALL calendar days in the month.
-
-    Algorithm:
-      1. Build a row for every calendar day from the 1st to the last of the
-         month (inclusive).
-      2. Known actuals are taken from actual_df.
-      3. Future dates with no actual use forward_rate.
-      4. Weekends and any other gaps are forward-filled from the last known
-         rate (e.g. March 1 Sun inherits the Feb 27 Fri fixing).
-      5. If the very first day of the month has no rate (month starts on a
-         weekend before any fixing exists), seed it from the last actual
-         available BEFORE the month start.
-      6. sr1_rate = mean of all calendar-day rates.
-
-    The "series" returned contains one row per calendar day so that the
-    running_avg and chart reflect the true daily rate sequence.
     """
     start     = date(year, month, 1)
     last_day  = date(year, month, calendar.monthrange(year, month)[1])
     end_excl  = last_day + timedelta(days=1)
 
-    # Build lookup: known actuals
     lookup = actual_df.set_index("date")["rate"].to_dict()
-
-    # Step 5 — seed value for forward-fill if month starts with no actual
     pre_actuals = actual_df[actual_df["date"] < start]
     seed_rate   = pre_actuals.iloc[-1]["rate"] if not pre_actuals.empty else None
 
-    # Step 1-4 — iterate every calendar day
     rows        = []
-    last_known  = seed_rate   # carries forward-filled rate
+    last_known  = seed_rate
     d           = start
     while d < end_excl:
         if d in lookup:
@@ -179,11 +139,9 @@ def compute_sr1(year: int, month: int,
             src        = "actual"
             last_known = rate
         elif last_known is not None:
-            # forward-fill: weekend / future day inherits previous rate
             rate = last_known
             src  = "forward_fill" if d.weekday() >= 5 else "forward"
         else:
-            # no prior rate at all — use forward_rate parameter
             rate       = forward_rate
             src        = "forward"
             last_known = rate
@@ -201,9 +159,6 @@ def compute_sr3(start_year: int, start_month: int,
                 actual_df: pd.DataFrame, forward_rate: float) -> dict:
     """
     SR3: compounded SOFR over the 3-month period (3rd Wed → 3rd Tue+3M).
-    factor = 1 + (rate/100) * (day_count/360)  where day_count=3 for Friday.
-    This correctly accounts for weekend carry in the compounding.
-    Structure UNCHANGED.
     """
     period_start = get_third_wednesday(start_year, start_month)
     em = start_month + 3
@@ -215,7 +170,6 @@ def compute_sr3(start_year: int, start_month: int,
                                actual_df, forward_rate)
     
     series["rate"] = pd.to_numeric(series["rate"], errors="coerce")
-    # factor = 1 + (rate/100) * (day_count/360)  — day_count=3 for Friday
     series["factor"]         = 1.0 + (series["rate"] / 100.0) * (series["day_count"] / 360.0)
     series["compound_index"] = series["factor"].cumprod()
     sr3_rate = (series["compound_index"].iloc[-1] - 1.0) * (360.0 / total_days) * 100.0
@@ -231,7 +185,7 @@ def apply_rounding(result: dict, contract: str) -> dict:
     if contract == "sr1":
         r["rate"]  = round_half_up(r["rate"], 3)
         r["price"] = round_half_up(100.0 - r["rate"], 3)
-    else:  # sr3
+    else:
         r["rate"]  = round_half_up(r["rate"], 4)
         r["price"] = round_half_up(100.0 - r["rate"], 4)
     return r
@@ -242,8 +196,11 @@ def compute_pnl(current_price: float, entry_price: float, lots: int, dv01: float
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# PERSISTENCE
+# PERSISTENCE (Browser Local Storage)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+ls = LocalStorage()
+_LS_KEY = "sofr_dashboard_state_v1"
 
 def _empty_state():
     return {
@@ -253,25 +210,35 @@ def _empty_state():
     }
 
 def load_state():
-    if not os.path.exists(STATE_FILE):
-        return _empty_state()
-
     try:
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
+        raw = ls.getItem(_LS_KEY)
+        if raw is None:
+            return _empty_state()
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        
+        # Coerce to ensure all dictionaries exist to prevent KeyErrors
+        if not isinstance(raw, dict) or "notes" not in raw:
+            return _empty_state()
+        for contract in ("sr1", "sr3"):
+            raw.setdefault(contract, {})
+            for c in CASES:
+                raw[contract].setdefault(c, {})
+        raw.setdefault("notes", {"sr1": {}, "sr3": {}})
+        return raw
+
     except Exception:
         return _empty_state()
 
 def save_state(state_obj):
     try:
-        with open(STATE_FILE, "w") as f:
-            json.dump(state_obj, f, indent=2)
+        ls.setItem(_LS_KEY, json.dumps(state_obj))
     except Exception as e:
-        st.warning(f"Could not save state: {e}")
+        st.warning(f"Could not save local state: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# GOOGLE SHEETS LOADER  — date | sofr | icap | gc  (icap, gc optional)
+# GOOGLE SHEETS LOADER
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(ttl=300)
@@ -309,8 +276,6 @@ def load_gsheet() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TABLE BUILDER
-# Columns: Date | Day | Days | Actual SOFR | GC Repo | ICAP | Case1-5 | Notes
-# Only business days (Mon-Fri). Days = calendar gap to next business day.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def build_table(start: date, end_excl: date,
@@ -321,7 +286,6 @@ def build_table(start: date, end_excl: date,
     gc_lk   = gc_df.set_index("date")["gc"].to_dict()     if not gc_df.empty   else {}
     bds     = business_days(start, end_excl)
 
-    # Best prior SOFR for prefilling: last actual available before today
     prev_sofr = None
     if not actual_df.empty:
         past = actual_df[actual_df["date"] < TODAY]
@@ -335,11 +299,6 @@ def build_table(start: date, end_excl: date,
         iso      = d.isoformat()
         act_val  = act_lk.get(d)
 
-        # Locking rules:
-        #   d < PENDING_FIXING_DAY  → historical, always locked
-        #   d == PENDING_FIXING_DAY → locked only if actual fixing has arrived
-        #                             else editable + prefilled (ICAP → prev SOFR)
-        #   d == TODAY or d > TODAY → future, always editable (use saved state)
         is_pending = (d == PENDING_FIXING_DAY)
         is_today   = (d == TODAY)
         is_hist    = (d < PENDING_FIXING_DAY)
@@ -358,13 +317,10 @@ def build_table(start: date, end_excl: date,
 
         for c in CASES:
             if act_val is not None:
-                # Actual fixing present — use it (locked)
                 row[c] = float(act_val)
             elif is_hist:
-                # Historical with no actual — show nothing, locked
                 row[c] = None
             elif is_pending:
-                # Pending fixing day, no actual yet — prefill but keep editable
                 saved = state[contract][c].get(iso)
                 if saved is not None:
                     row[c] = float(saved)
@@ -375,7 +331,6 @@ def build_table(start: date, end_excl: date,
                 else:
                     row[c] = None
             else:
-                # TODAY or future — use saved state only
                 saved = state[contract][c].get(iso)
                 row[c] = float(saved) if saved is not None else None
 
@@ -390,22 +345,16 @@ def build_table(start: date, end_excl: date,
 
 def resolve_final(table: pd.DataFrame, actual_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     act_lk = actual_df.set_index("date")["rate"].to_dict()
-
     results = {}
 
     for c in CASES:
-
         rows = []
-
         for _, row in table.iterrows():
-
             d = row["Date"]
-
             if isinstance(d, pd.Timestamp):
                 d = d.date()
 
             r = act_lk.get(d, row[c])
-
             try:
                 r = float(r)
             except (TypeError, ValueError):
@@ -437,7 +386,7 @@ def icap_as_df(start: date, end_excl: date,
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMPUTE HELPERS  — apply rounding after each compute
+# COMPUTE HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _run_sr1(adf, fwd=0.0):
@@ -473,22 +422,22 @@ def copy_icap_to_case1(contract: str, start: date, end_excl: date):
     lk = icap_df.set_index("date")["icap"].to_dict() if not icap_df.empty else {}
     ck = contract.lower()
     act_lk = actual_df.set_index("date")["rate"].to_dict()
+    
     for d in business_days(start, end_excl):
-        # Only fill unlocked rows: pending-fixing-day (no actual) and future
         act_val = act_lk.get(d)
         is_locked = (d < PENDING_FIXING_DAY) or (d == PENDING_FIXING_DAY and act_val is not None)
         if not is_locked and d not in actual_dates and d in lk:
-            state[ck]["Case1"][d.isoformat()] = float(lk[d])
-    save_state(state)
+            iso = d.isoformat()
+            if state[ck]["Case1"].get(iso) != float(lk[d]):
+                state[ck]["Case1"][iso] = float(lk[d])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CHART BUILDERS  — Altair for fixed y-axis control
+# CHART BUILDERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def sofr_fixing_chart(cases_results: dict,
                       actual_df: pd.DataFrame, icap_df: pd.DataFrame) -> alt.Chart | None:
-    """Daily SOFR fixing: Actual + ICAP + Case1–5. Fixed y: SOFR_Y_MIN–SOFR_Y_MAX."""
     records = []
     act_lk = actual_df.set_index("date")["rate"].to_dict()
     for d, r in act_lk.items():
@@ -523,13 +472,10 @@ def sofr_fixing_chart(cases_results: dict,
 
 
 def gc_chart(gc_df: pd.DataFrame, actual_df: pd.DataFrame) -> alt.Chart | None:
-    """GC Repo + SOFR Actual chart with auto y-axis."""
     if gc_df.empty and actual_df.empty:
         return None
 
     records = []
-
-    # GC data
     if not gc_df.empty:
         df_gc = gc_df.copy()
         df_gc["date"] = pd.to_datetime(df_gc["date"])
@@ -540,7 +486,6 @@ def gc_chart(gc_df: pd.DataFrame, actual_df: pd.DataFrame) -> alt.Chart | None:
                 "series": "GC Repo"
             })
 
-    # SOFR actual data
     if not actual_df.empty:
         df_sofr = actual_df.copy()
         df_sofr["date"] = pd.to_datetime(df_sofr["date"])
@@ -578,7 +523,6 @@ def gc_chart(gc_df: pd.DataFrame, actual_df: pd.DataFrame) -> alt.Chart | None:
 
 def past_month_actual_chart(actual_df: pd.DataFrame,
                              start: date, end_excl: date) -> alt.Chart | None:
-    """Past-month mode: only Actual SOFR in window."""
     act_lk = actual_df.set_index("date")["rate"].to_dict()
     records = [{"date": pd.to_datetime(d), "rate": r}
                for d, r in act_lk.items() if start <= d < end_excl]
@@ -728,10 +672,13 @@ with st.sidebar:
         e   = (date(sel_year, sel_month,
                     calendar.monthrange(sel_year, sel_month)[1]) + timedelta(days=1)
                if ck == "sr1" else get_third_tuesday(_ey, _em) + timedelta(days=1))
+        
         for d in business_days(s, e):
             if d not in actual_dates and d >= PENDING_FIXING_DAY:
-                state[ck][ff_case][d.isoformat()] = ff_val
-        save_state(state)
+                iso = d.isoformat()
+                if state[ck][ff_case].get(iso) != ff_val:
+                    state[ck][ff_case][iso] = ff_val
+                    
         st.success(f"Filled {ff_case} for {ff_contract}.")
 
     st.markdown("---")
@@ -744,8 +691,9 @@ with st.sidebar:
         for iso_str, val in list(state[ck][sh_case].items()):
             d = date.fromisoformat(iso_str)
             if d not in actual_dates and d >= PENDING_FIXING_DAY:
-                state[ck][sh_case][iso_str] = round(val + sh_bps / 100.0, 6)
-        save_state(state)
+                new_val = round(val + sh_bps / 100.0, 6)
+                if state[ck][sh_case][iso_str] != new_val:
+                    state[ck][sh_case][iso_str] = new_val
         st.success(f"Shifted {sh_case} by {sh_bps:+.1f} bps.")
 
     st.markdown("---")
@@ -753,9 +701,14 @@ with st.sidebar:
     if st.button("🗑 Clear saved state"):
         st.session_state.state = _empty_state()
         state = st.session_state.state
-        save_state(state)
         st.success("State cleared.")
         st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 💾 Save")
+    if st.button("💾 Save Changes"):
+        save_state(state)
+        st.success("Changes saved locally in this browser.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONTRACT WINDOWS
@@ -770,11 +723,9 @@ sr3_end_incl = get_third_tuesday(_ey, _em)
 sr3_end_excl = sr3_end_incl + timedelta(days=1)
 sr3_cal_days = (sr3_end_incl - sr3_start).days + 1
 
-# Fully-past month flag: last day of month < today
 sr1_is_past = (sr1_end_excl - timedelta(days=1)) < TODAY
 sr3_is_past = sr3_end_incl < TODAY
 
-# Forward avg default (sidebar estimator removed; kept for internal calc compatibility)
 fwd_avg = 0.0
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -827,18 +778,6 @@ def fwd_banner(price, rate, fwd):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SINGLE TABLE RENDERER
-#
-# ONE unified data_editor. Locking strategy:
-#   Locked rows have their Case values cast to formatted strings.
-#   Streamlit cannot parse a string as a number inside a NumberColumn →
-#   the cell renders as static text that cannot be edited.
-#   Editable rows keep float dtype and remain fully interactive.
-#
-# Row classification (from build_table._locked):
-#   _locked=True  → historical or pending-fixing-with-actual → stringified
-#   _locked=False → pending (no actual yet), today, future   → numeric float
-#
-# Today row gets an orange border injected via CSS data-rowindex targeting.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_table(contract: str, start: date, end_excl: date,
@@ -846,16 +785,12 @@ def render_table(contract: str, start: date, end_excl: date,
 
     scaffold = build_table(start, end_excl, actual_df, icap_df, gc_df, state, contract)
 
-    # ── DISPLAY DF ────────────────────────────────────────────────────────────
     display_df   = scaffold.drop(columns=["_locked", "_today"]).copy()
     locked_mask  = scaffold["_locked"].values
 
-    # Widen Case columns to object so they can hold both str and float
     for c in CASES:
         display_df[c] = display_df[c].astype(object)
 
-    # Locked rows → stringify (renders as non-editable text in NumberColumn)
-    # Editable rows → explicit float (remains numeric/editable)
     for c in CASES:
         for i, locked in enumerate(locked_mask):
             idx = display_df.index[i]
@@ -871,7 +806,6 @@ def render_table(contract: str, start: date, end_excl: date,
                 except (TypeError, ValueError):
                     display_df.at[idx, c] = None
 
-    # ── TODAY ROW ORANGE BORDER — CSS injection ───────────────────────────────
     today_positions = [
         i for i, d in enumerate(display_df["Date"])
         if (d.date() if isinstance(d, pd.Timestamp) else d) == TODAY
@@ -894,7 +828,6 @@ def render_table(contract: str, start: date, end_excl: date,
             unsafe_allow_html=True,
         )
 
-    # ── COLUMN CONFIG ─────────────────────────────────────────────────────────
     all_locked = locked_mask.all()
     col_cfg = {
         "Date":        st.column_config.DateColumn("Date",          disabled=True),
@@ -914,7 +847,6 @@ def render_table(contract: str, start: date, end_excl: date,
                 c, format="%.2f", min_value=0.0, max_value=20.0)
         col_cfg["Notes"] = st.column_config.TextColumn("Notes")
 
-    # ── SINGLE DATA EDITOR ────────────────────────────────────────────────────
     edited = st.data_editor(
         display_df,
         column_config=col_cfg,
@@ -924,7 +856,6 @@ def render_table(contract: str, start: date, end_excl: date,
         num_rows="fixed",
     )
 
-    # Notes badges
     note_mask = edited["Notes"].notna() & (edited["Notes"].astype(str).str.strip() != "")
     if note_mask.any():
         badges = " ".join(
@@ -932,8 +863,6 @@ def render_table(contract: str, start: date, end_excl: date,
             for _, r in edited[note_mask].iterrows())
         st.markdown(f"🟡 Notes on: {badges}", unsafe_allow_html=True)
 
-    # ── PERSIST — unlocked & non-actual rows ONLY ─────────────────────────────
-    changed = False
     for idx, row in edited.iterrows():
         d = row["Date"]
         if isinstance(d, pd.Timestamp):
@@ -951,20 +880,13 @@ def render_table(contract: str, start: date, end_excl: date,
                     continue
                 if state[contract][c].get(iso) != fval:
                     state[contract][c][iso] = fval
-                    changed = True
             note = str(row["Notes"] or "").strip()
             if state["notes"][contract].get(iso, "") != note:
                 state["notes"][contract][iso] = note
-                changed = True
         elif is_locked:
-            # Locked rows: only notes are persisted
             note = str(row["Notes"] or "").strip()
             if state["notes"][contract].get(iso, "") != note:
                 state["notes"][contract][iso] = note
-                changed = True
-
-    if changed:
-        save_state(state)
 
     return edited
 
@@ -987,7 +909,6 @@ def render_past_month(contract_label: str, start: date, end_excl: date,
     df = pd.DataFrame(rows)
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    # Settlement from actuals only
     actual_window = actual_df[
         actual_df["date"].apply(lambda d: start <= d < end_excl)]
     if not actual_window.empty:
@@ -1029,7 +950,6 @@ with tab_sr1:
             'Showing actuals only — no editable cases.</div>',
             unsafe_allow_html=True)
         render_past_month("SR1", sr1_start, sr1_end_excl, compute_sr1, "sr1")
-        # Stubs for PnL tab downstream
         sr1_res = {}
         edited_sr1 = pd.DataFrame()
     else:
