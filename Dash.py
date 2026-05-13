@@ -18,13 +18,14 @@ import numpy as np
 from datetime import date, timedelta
 import calendar, os, json
 import altair as alt
+import decimal as _dec
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATHS & CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-STATE_PATH  = os.path.join(BASE_DIR, "sofr_state.json")
+STATE_FILE  = os.path.join(BASE_DIR, "sofr_state.json")
 
 GSHEET_CSV_URL = (
     "https://docs.google.com/spreadsheets/d/"
@@ -40,14 +41,24 @@ TC_PER_LOT  = 1.0
 TODAY       = date.today()
 YESTERDAY   = TODAY - timedelta(days=1)
 
+# SOFR fixing for YESTERDAY is published around 1 PM on TODAY.
+# Until it arrives, yesterday's row is editable and prefilled.
+# TODAY itself always behaves as a plain future (editable) day.
+def _prev_business_day(d: date) -> date:
+    """Return the most recent business day strictly before d."""
+    prev = d - timedelta(days=1)
+    while prev.weekday() >= 5:      # skip Saturday (5) and Sunday (6)
+        prev -= timedelta(days=1)
+    return prev
+
+PENDING_FIXING_DAY = _prev_business_day(TODAY)   # yesterday's business day
+
 SOFR_Y_MIN  = 3.50          # fixed SOFR chart y-axis
 SOFR_Y_MAX  = 3.75
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROUNDING  — round-half-up (Decimal-style), not Python banker's rounding
 # ═══════════════════════════════════════════════════════════════════════════════
-
-import decimal as _dec
 
 def round_half_up(value: float, decimals: int) -> float:
     q = _dec.Decimal(10) ** -decimals
@@ -181,6 +192,7 @@ def compute_sr1(year: int, month: int,
 
     series = pd.DataFrame(rows)
     series["running_avg"] = series["rate"].expanding().mean()
+    series["rate"] = pd.to_numeric(series["rate"], errors="coerce")
     sr1_rate = series["rate"].mean()
     return {"rate": sr1_rate, "price": 100.0 - sr1_rate, "series": series}
 
@@ -201,6 +213,8 @@ def compute_sr3(start_year: int, start_month: int,
     total_days = (period_end - period_start).days + 1
     series = build_rate_series(period_start, period_end + timedelta(days=1),
                                actual_df, forward_rate)
+    
+    series["rate"] = pd.to_numeric(series["rate"], errors="coerce")
     # factor = 1 + (rate/100) * (day_count/360)  — day_count=3 for Friday
     series["factor"]         = 1.0 + (series["rate"] / 100.0) * (series["day_count"] / 360.0)
     series["compound_index"] = series["factor"].cumprod()
@@ -231,30 +245,27 @@ def compute_pnl(current_price: float, entry_price: float, lots: int, dv01: float
 # PERSISTENCE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def load_state() -> dict:
-    empty = {"sr1": {c: {} for c in CASES}, "sr3": {c: {} for c in CASES},
-             "notes": {"sr1": {}, "sr3": {}}}
-    if not os.path.exists(STATE_PATH):
-        return empty
+def _empty_state():
+    return {
+        "sr1": {c: {} for c in CASES},
+        "sr3": {c: {} for c in CASES},
+        "notes": {"sr1": {}, "sr3": {}},
+    }
+
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return _empty_state()
+
     try:
-        with open(STATE_PATH) as f:
-            raw = json.load(f)
-        for contract in ("sr1", "sr3"):
-            raw.setdefault(contract, {})
-            for c in CASES:
-                raw[contract].setdefault(c, {})
-        raw.setdefault("notes", {"sr1": {}, "sr3": {}})
-        raw["notes"].setdefault("sr1", {})
-        raw["notes"].setdefault("sr3", {})
-        return raw
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
     except Exception:
-        return empty
+        return _empty_state()
 
-
-def save_state(st_obj: dict):
+def save_state(state_obj):
     try:
-        with open(STATE_PATH, "w") as f:
-            json.dump(st_obj, f, indent=2, default=str)
+        with open(STATE_FILE, "w") as f:
+            json.dump(state_obj, f, indent=2)
     except Exception as e:
         st.warning(f"Could not save state: {e}")
 
@@ -263,7 +274,7 @@ def save_state(st_obj: dict):
 # GOOGLE SHEETS LOADER  — date | sofr | icap | gc  (icap, gc optional)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(ttl=0)
+@st.cache_data(ttl=300)
 def load_gsheet() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     empty_a = pd.DataFrame(columns=["date", "rate"])
     empty_i = pd.DataFrame(columns=["date", "icap"])
@@ -308,14 +319,14 @@ def build_table(start: date, end_excl: date,
     act_lk  = actual_df.set_index("date")["rate"].to_dict()
     icap_lk = icap_df.set_index("date")["icap"].to_dict() if not icap_df.empty else {}
     gc_lk   = gc_df.set_index("date")["gc"].to_dict()     if not gc_df.empty   else {}
-    bds  = business_days(start, end_excl)
+    bds     = business_days(start, end_excl)
 
-    # Determine previous business day's SOFR for today fallback
+    # Best prior SOFR for prefilling: last actual available before today
     prev_sofr = None
     if not actual_df.empty:
         past = actual_df[actual_df["date"] < TODAY]
         if not past.empty:
-            prev_sofr = past.iloc[-1]["rate"]
+            prev_sofr = float(past.iloc[-1]["rate"])
 
     rows = []
     for i, d in enumerate(bds):
@@ -323,8 +334,17 @@ def build_table(start: date, end_excl: date,
         dc       = calendar_gap_day_count(d, next_bd)
         iso      = d.isoformat()
         act_val  = act_lk.get(d)
-        locked   = (d <= YESTERDAY)
-        is_today = (d == TODAY)
+
+        # Locking rules:
+        #   d < PENDING_FIXING_DAY  → historical, always locked
+        #   d == PENDING_FIXING_DAY → locked only if actual fixing has arrived
+        #                             else editable + prefilled (ICAP → prev SOFR)
+        #   d == TODAY or d > TODAY → future, always editable (use saved state)
+        is_pending = (d == PENDING_FIXING_DAY)
+        is_today   = (d == TODAY)
+        is_hist    = (d < PENDING_FIXING_DAY)
+        locked     = is_hist or (is_pending and act_val is not None)
+
         row = {
             "Date":        d,
             "Day":         d.strftime("%a"),
@@ -335,24 +355,30 @@ def build_table(start: date, end_excl: date,
             "_locked":     locked,
             "_today":      is_today,
         }
+
         for c in CASES:
             if act_val is not None:
-                row[c] = act_val              # actual fixing available — use it
-            elif locked:
-                row[c] = None                 # past, no actual -> blank & locked
-            elif is_today:
-                # Today: prefill with best available value (priority order)
+                # Actual fixing present — use it (locked)
+                row[c] = float(act_val)
+            elif is_hist:
+                # Historical with no actual — show nothing, locked
+                row[c] = None
+            elif is_pending:
+                # Pending fixing day, no actual yet — prefill but keep editable
                 saved = state[contract][c].get(iso)
                 if saved is not None:
-                    row[c] = saved            # user has already edited this
-                elif icap_lk.get(d) is not None:
-                    row[c] = icap_lk[d]       # ICAP available
+                    row[c] = float(saved)
+                elif d in icap_lk and pd.notna(icap_lk[d]):
+                    row[c] = float(icap_lk[d])
                 elif prev_sofr is not None:
-                    row[c] = prev_sofr         # previous BD's SOFR
+                    row[c] = float(prev_sofr)
                 else:
                     row[c] = None
             else:
-                row[c] = state[contract][c].get(iso)
+                # TODAY or future — use saved state only
+                saved = state[contract][c].get(iso)
+                row[c] = float(saved) if saved is not None else None
+
         row["Notes"] = state["notes"][contract].get(iso, "")
         rows.append(row)
     return pd.DataFrame(rows)
@@ -364,15 +390,35 @@ def build_table(start: date, end_excl: date,
 
 def resolve_final(table: pd.DataFrame, actual_df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     act_lk = actual_df.set_index("date")["rate"].to_dict()
+
     results = {}
+
     for c in CASES:
+
         rows = []
+
         for _, row in table.iterrows():
-            d  = row["Date"]
-            if isinstance(d, pd.Timestamp): d = d.date()
-            r  = act_lk.get(d, row[c])
-            rows.append({"date": d, "rate": r, "day_count": int(row["Days"])})
+
+            d = row["Date"]
+
+            if isinstance(d, pd.Timestamp):
+                d = d.date()
+
+            r = act_lk.get(d, row[c])
+
+            try:
+                r = float(r)
+            except (TypeError, ValueError):
+                r = np.nan
+
+            rows.append({
+                "date": d,
+                "rate": r,
+                "day_count": int(row["Days"])
+            })
+
         results[c] = pd.DataFrame(rows).dropna(subset=["rate"])
+
     return results
 
 
@@ -426,8 +472,12 @@ def fwd_avg_result_sr3(fwd: float) -> dict:
 def copy_icap_to_case1(contract: str, start: date, end_excl: date):
     lk = icap_df.set_index("date")["icap"].to_dict() if not icap_df.empty else {}
     ck = contract.lower()
+    act_lk = actual_df.set_index("date")["rate"].to_dict()
     for d in business_days(start, end_excl):
-        if d > YESTERDAY and d not in actual_dates and d in lk:
+        # Only fill unlocked rows: pending-fixing-day (no actual) and future
+        act_val = act_lk.get(d)
+        is_locked = (d < PENDING_FIXING_DAY) or (d == PENDING_FIXING_DAY and act_val is not None)
+        if not is_locked and d not in actual_dates and d in lk:
             state[ck]["Case1"][d.isoformat()] = float(lk[d])
     save_state(state)
 
@@ -679,7 +729,7 @@ with st.sidebar:
                     calendar.monthrange(sel_year, sel_month)[1]) + timedelta(days=1)
                if ck == "sr1" else get_third_tuesday(_ey, _em) + timedelta(days=1))
         for d in business_days(s, e):
-            if d not in actual_dates and d > YESTERDAY:
+            if d not in actual_dates and d >= PENDING_FIXING_DAY:
                 state[ck][ff_case][d.isoformat()] = ff_val
         save_state(state)
         st.success(f"Filled {ff_case} for {ff_contract}.")
@@ -693,7 +743,7 @@ with st.sidebar:
         ck = sh_contract.lower()
         for iso_str, val in list(state[ck][sh_case].items()):
             d = date.fromisoformat(iso_str)
-            if d not in actual_dates and d > YESTERDAY:
+            if d not in actual_dates and d >= PENDING_FIXING_DAY:
                 state[ck][sh_case][iso_str] = round(val + sh_bps / 100.0, 6)
         save_state(state)
         st.success(f"Shifted {sh_case} by {sh_bps:+.1f} bps.")
@@ -701,9 +751,11 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### 🗑 Clear State")
     if st.button("🗑 Clear saved state"):
-        st.session_state.state = load_state.__wrapped__() if hasattr(load_state, '__wrapped__') else load_state()
-        save_state(st.session_state.state)
+        st.session_state.state = _empty_state()
+        state = st.session_state.state
+        save_state(state)
         st.success("State cleared.")
+        st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONTRACT WINDOWS
@@ -776,33 +828,75 @@ def fwd_banner(price, rate, fwd):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SINGLE TABLE RENDERER
 #
-# ONE unified data_editor. Locking rules:
-#   - Date <= YESTERDAY  →  ALL case columns + Notes disabled (locked)
-#   - Date > YESTERDAY   →  Case columns editable, Notes editable
-#   - Actual SOFR, GC Repo, ICAP, Date, Day, Days are always disabled
+# ONE unified data_editor. Locking strategy:
+#   Locked rows have their Case values cast to formatted strings.
+#   Streamlit cannot parse a string as a number inside a NumberColumn →
+#   the cell renders as static text that cannot be edited.
+#   Editable rows keep float dtype and remain fully interactive.
 #
-# Weekend handling: build_table() only generates business days.
-# Friday rows have Days=3, representing Fri+Sat+Sun carry.
-# No Saturday/Sunday rows are ever created or displayed.
+# Row classification (from build_table._locked):
+#   _locked=True  → historical or pending-fixing-with-actual → stringified
+#   _locked=False → pending (no actual yet), today, future   → numeric float
+#
+# Today row gets an orange border injected via CSS data-rowindex targeting.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def render_table(contract: str, start: date, end_excl: date, key: str) -> pd.DataFrame:
+def render_table(contract: str, start: date, end_excl: date,
+                 key: str) -> pd.DataFrame:
+
     scaffold = build_table(start, end_excl, actual_df, icap_df, gc_df, state, contract)
 
-    # Today highlight
-    today_mask = scaffold["_today"]
-    if today_mask.any():
-        today_date = scaffold.loc[today_mask, "Date"].iloc[0]
+    # ── DISPLAY DF ────────────────────────────────────────────────────────────
+    display_df   = scaffold.drop(columns=["_locked", "_today"]).copy()
+    locked_mask  = scaffold["_locked"].values
+
+    # Widen Case columns to object so they can hold both str and float
+    for c in CASES:
+        display_df[c] = display_df[c].astype(object)
+
+    # Locked rows → stringify (renders as non-editable text in NumberColumn)
+    # Editable rows → explicit float (remains numeric/editable)
+    for c in CASES:
+        for i, locked in enumerate(locked_mask):
+            idx = display_df.index[i]
+            raw = display_df.at[idx, c]
+            if locked:
+                try:
+                    display_df.at[idx, c] = f"{float(raw):.2f}"
+                except (TypeError, ValueError):
+                    display_df.at[idx, c] = ""
+            else:
+                try:
+                    display_df.at[idx, c] = float(raw)
+                except (TypeError, ValueError):
+                    display_df.at[idx, c] = None
+
+    # ── TODAY ROW ORANGE BORDER — CSS injection ───────────────────────────────
+    today_positions = [
+        i for i, d in enumerate(display_df["Date"])
+        if (d.date() if isinstance(d, pd.Timestamp) else d) == TODAY
+    ]
+    if today_positions:
+        row_idx = today_positions[0]
         st.markdown(
-            f'Today in period: <span class="today-badge">📅 {today_date} ({today_date.strftime("%a")})</span>',
-            unsafe_allow_html=True)
+            f"""<style>
+[data-testid="stDataFrameResizable"] div[data-rowindex="{row_idx}"] > div {{
+    border-top: 2px solid #f59e0b !important;
+    border-bottom: 2px solid #f59e0b !important;
+}}
+[data-testid="stDataFrameResizable"] div[data-rowindex="{row_idx}"] > div:first-child {{
+    border-left: 2px solid #f59e0b !important;
+}}
+[data-testid="stDataFrameResizable"] div[data-rowindex="{row_idx}"] > div:last-child {{
+    border-right: 2px solid #f59e0b !important;
+}}
+</style>""",
+            unsafe_allow_html=True,
+        )
 
-    # Drop internal marker columns before rendering
-    display_df = scaffold.drop(columns=["_locked", "_today"])
-
-    # ── Column configuration ──────────────────────────────────────────────────
-    # Static (always disabled) columns
-    base_cfg = {
+    # ── COLUMN CONFIG ─────────────────────────────────────────────────────────
+    all_locked = locked_mask.all()
+    col_cfg = {
         "Date":        st.column_config.DateColumn("Date",          disabled=True),
         "Day":         st.column_config.TextColumn("Day",           disabled=True, width="small"),
         "Days":        st.column_config.NumberColumn("Days",        disabled=True, width="small"),
@@ -810,38 +904,17 @@ def render_table(contract: str, start: date, end_excl: date, key: str) -> pd.Dat
         "GC Repo":     st.column_config.NumberColumn("GC Repo (%)", disabled=True, format="%.2f"),
         "ICAP":        st.column_config.NumberColumn("ICAP (%)",    disabled=True, format="%.2f"),
     }
-
-    # Determine which rows are locked (past) vs editable (future/today)
-    # We use scaffold's _locked column for this logic
-    locked_dates = set(
-        scaffold.loc[scaffold["_locked"], "Date"].apply(
-            lambda d: d if isinstance(d, date) else d.date()
-        ).tolist()
-    )
-    future_dates = set(
-        scaffold.loc[~scaffold["_locked"], "Date"].apply(
-            lambda d: d if isinstance(d, date) else d.date()
-        ).tolist()
-    )
-
-    # If ALL rows are locked (e.g. mid-past-month partial view), disable everything
-    all_locked = len(future_dates) == 0
-
-    col_cfg = dict(base_cfg)
     if all_locked:
-        # Fully disable case columns and notes
         for c in CASES:
-            col_cfg[c] = st.column_config.NumberColumn(c, disabled=True, format="%.2f")
+            col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
         col_cfg["Notes"] = st.column_config.TextColumn("Notes", disabled=True)
     else:
-        # Future case columns are editable; past rows will have their values
-        # preserved from actual/state and won't be saved back even if touched
         for c in CASES:
             col_cfg[c] = st.column_config.NumberColumn(
                 c, format="%.2f", min_value=0.0, max_value=20.0)
         col_cfg["Notes"] = st.column_config.TextColumn("Notes")
 
-    # ── Single data_editor ────────────────────────────────────────────────────
+    # ── SINGLE DATA EDITOR ────────────────────────────────────────────────────
     edited = st.data_editor(
         display_df,
         column_config=col_cfg,
@@ -851,39 +924,41 @@ def render_table(contract: str, start: date, end_excl: date, key: str) -> pd.Dat
         num_rows="fixed",
     )
 
-    # Note badges
-    note_mask = edited["Notes"].notna() & (edited["Notes"].str.strip() != "")
+    # Notes badges
+    note_mask = edited["Notes"].notna() & (edited["Notes"].astype(str).str.strip() != "")
     if note_mask.any():
         badges = " ".join(
             f'<span class="note-badge">{r["Day"]} {r["Date"]}</span>'
             for _, r in edited[note_mask].iterrows())
         st.markdown(f"🟡 Notes on: {badges}", unsafe_allow_html=True)
 
-    # ── Persist — future & non-actual rows ONLY ───────────────────────────────
-    # Past rows (date <= YESTERDAY) are NEVER written back to state,
-    # regardless of what the editor returns for those rows.
+    # ── PERSIST — unlocked & non-actual rows ONLY ─────────────────────────────
     changed = False
-    for _, row in edited.iterrows():
+    for idx, row in edited.iterrows():
         d = row["Date"]
-        if isinstance(d, pd.Timestamp): d = d.date()
+        if isinstance(d, pd.Timestamp):
+            d = d.date()
         iso = d.isoformat()
 
-        if d > YESTERDAY and d not in actual_dates:
-            # Editable future row — persist case values
+        is_locked = bool(scaffold.loc[idx, "_locked"])
+
+        if not is_locked and d not in actual_dates:
             for c in CASES:
                 val = row[c]
-                if pd.notna(val):
-                    if state[contract][c].get(iso) != float(val):
-                        state[contract][c][iso] = float(val)
-                        changed = True
-            # Persist notes for future rows
-            note = (row["Notes"] or "").strip()
+                try:
+                    fval = float(val)
+                except (TypeError, ValueError):
+                    continue
+                if state[contract][c].get(iso) != fval:
+                    state[contract][c][iso] = fval
+                    changed = True
+            note = str(row["Notes"] or "").strip()
             if state["notes"][contract].get(iso, "") != note:
                 state["notes"][contract][iso] = note
                 changed = True
-        elif d <= YESTERDAY:
-            # Past row — only persist notes (case values locked / not editable)
-            note = (row["Notes"] or "").strip()
+        elif is_locked:
+            # Locked rows: only notes are persisted
+            note = str(row["Notes"] or "").strip()
             if state["notes"][contract].get(iso, "") != note:
                 state["notes"][contract][iso] = note
                 changed = True
