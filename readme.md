@@ -125,24 +125,7 @@ All cases calculate independent SR1 and SR3 settlement projections simultaneousl
 
 ---
 
-# 5. Today Prefill Logic
-
-The dashboard intelligently handles days where the latest SOFR fixing has not yet been published.
-
-For the current business day:
-
-Priority order:
-
-1. Existing saved user value
-2. ICAP fixing if available
-3. Previous SOFR fixing
-4. Fallback default
-
-This prevents blank cells during the trading session before SOFR publication.
-
----
-
-# 6. Locked Historical Data
+# 5. Locked Historical Data
 
 Historical business days are automatically locked.
 
@@ -160,19 +143,7 @@ This ensures:
 
 ---
 
-# 7. Visual Highlighting
-
-The current business day is visually highlighted using an orange border.
-
-Purpose:
-
-- Fast trader focus
-- Quick identification of current editable fixing row
-- Easier intraday monitoring
-
----
-
-# 8. ICAP Integration
+# 6. ICAP Integration
 
 The dashboard supports ICAP projected rates.
 
@@ -188,7 +159,7 @@ This allows rapid baseline scenario generation.
 
 ---
 
-# 9. GC Repo Monitoring
+# 7. GC Repo Monitoring
 
 GC Repo rates are integrated alongside SOFR.
 
@@ -208,7 +179,7 @@ Useful for:
 
 ---
 
-# 10. Interactive Charts
+# 8. Interactive Charts
 
 The dashboard includes:
 
@@ -226,7 +197,7 @@ Features:
 
 ---
 
-# 11. Fast Fill Functionality
+# 9. Fast Fill Functionality
 
 The sidebar includes a Fast Fill engine.
 
@@ -244,7 +215,7 @@ Useful for:
 
 ---
 
-# 12. Shift Engine
+# 10. Shift Engine
 
 The dashboard includes a basis-point shift engine.
 
@@ -263,7 +234,7 @@ Only future dates are affected.
 
 ---
 
-# 13. Past-Month Historical Mode
+# 11. Past-Month Historical Mode
 
 When a contract month is fully historical:
 
@@ -278,7 +249,7 @@ This creates a clean separation between:
 
 ---
 
-# 14. Dark Trading Desk UI
+# 12. Dark Trading Desk UI
 
 The dashboard uses a professional dark theme optimized for trading desk usage.
 
