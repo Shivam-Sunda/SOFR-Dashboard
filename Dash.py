@@ -598,159 +598,92 @@ body,
 [data-testid="stMain"],
 section.main {
     font-family: 'IBM Plex Sans', sans-serif;
-    background: #0d0f14 !important;
-    color: #c9d1e0 !important;
 }
-h1, h2, h3 { font-family: 'IBM Plex Mono', monospace; color: #e2e8f0; }
 
-div[data-testid="stSidebar"] {
-    background: #10131b !important;
-    border-right: 1px solid #1e2436;
+h1, h2, h3 {
+    font-family: 'IBM Plex Mono', monospace;
 }
-div[data-testid="stSidebar"] * { color: #c9d1e0 !important; }
 
 .metric-card {
-    background: #161a24;
-    border: 1px solid #2a3147;
     border-radius: 8px;
     padding: 13px 16px;
     margin-bottom: 7px;
 }
-.metric-card.hl       { border-color: #3b82f6; border-width: 2px; }
-.metric-card.icap-card{ border-color: #f59e0b; }
-.metric-card.settle   { border-color: #34d399; border-width: 2px; }
+
+.metric-card.hl {
+    border-width: 2px;
+}
+
+.metric-card.settle {
+    border-width: 2px;
+}
 
 .metric-label {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px; letter-spacing: .12em;
-    color: #64748b; text-transform: uppercase; margin-bottom: 3px;
+    font-size: 10px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
 }
+
 .metric-price {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 24px; font-weight: 600; color: #38bdf8; line-height: 1.1;
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.1;
 }
-.metric-price.icap { color: #f59e0b; }
-.metric-price.settle { color: #34d399; font-size: 32px; }
-.metric-rate { font-size: 11px; color: #94a3b8; margin-top: 3px; }
-.metric-sub  { font-size: 11px; color: #64748b; margin-top: 2px; }
-.pnl-pos { color: #34d399; }
-.pnl-neg { color: #f87171; }
+
+.metric-price.settle {
+    font-size: 32px;
+}
+
+.metric-rate {
+    font-size: 11px;
+    margin-top: 3px;
+}
+
+.metric-sub {
+    font-size: 11px;
+    margin-top: 2px;
+}
 
 .section-title {
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 11px; letter-spacing: .1em; color: #4b5563;
+    font-size: 11px;
+    letter-spacing: .1em;
     text-transform: uppercase;
-    border-bottom: 1px solid #1e2436;
-    padding-bottom: 5px; margin: 18px 0 10px;
+    padding-bottom: 5px;
+    margin: 18px 0 10px;
 }
+
 .note-badge {
-    display: inline-block; background: #78350f; color: #fde68a;
-    font-size: 10px; border-radius: 3px; padding: 1px 5px; margin-left: 4px;
+    display: inline-block;
+    font-size: 10px;
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
 }
+
 .fwd-box {
-    background: #161a24; border: 1px solid #2a3147;
-    border-radius: 8px; padding: 12px 16px; margin-bottom: 10px;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
 }
+
 .today-badge {
-    display: inline-block; background: #1e3a5f; color: #93c5fd;
-    font-size: 10px; border-radius: 3px; padding: 1px 6px;
-    border: 1px solid #3b82f6; margin-left: 6px; vertical-align: middle;
+    display: inline-block;
+    font-size: 10px;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    vertical-align: middle;
 }
+
 .past-month-banner {
-    background: #1a1a2e; border: 1px solid #3730a3;
-    border-radius: 8px; padding: 10px 16px; margin-bottom: 12px;
-    color: #a5b4fc; font-size: 12px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-
-/* ───────────────── FORCE DARK STREAMLIT COMPONENTS ───────────────── */
-
-/* Data editor / dataframe */
-[data-testid="stDataFrame"],
-[data-testid="stDataEditor"],
-[data-testid="stDataFrameResizable"] {
-    background-color: #161a24 !important;
-    border: 1px solid #2a3147 !important;
-    border-radius: 8px !important;
-}
-
-/* Glide grid */
-div[class*="glide-data-grid"] {
-    background-color: #161a24 !important;
-}
-
-/* Header cells */
-div[class*="glide-data-grid"] [role="columnheader"] {
-    background-color: #10131b !important;
-    color: #94a3b8 !important;
-    border-bottom: 1px solid #2a3147 !important;
-}
-
-/* Table cells */
-div[class*="glide-data-grid"] [role="gridcell"] {
-    background-color: #161a24 !important;
-    color: #c9d1e0 !important;
-    border-color: #2a3147 !important;
-}
-
-/* Editing input inside table */
-div[class*="glide-data-grid"] input {
-    background-color: #1b2130 !important;
-    color: #e2e8f0 !important;
-}
-
-/* Sidebar buttons */
-[data-testid="stSidebar"] .stButton > button {
-    background-color: #161a24 !important;
-    color: #c9d1e0 !important;
-    border: 1px solid #2a3147 !important;
-}
-
-/* Main buttons */
-.stButton > button {
-    background-color: #1b2130 !important;
-    color: #c9d1e0 !important;
-    border: 1px solid #2a3147 !important;
-    border-radius: 8px !important;
-}
-
-/* Inputs */
-input,
-textarea,
-[data-baseweb="input"],
-[data-baseweb="base-input"] {
-    background-color: #161a24 !important;
-    color: #c9d1e0 !important;
-    border: 1px solid #2a3147 !important;
-}
-
-/* Selectbox */
-[data-baseweb="select"] > div {
-    background-color: #161a24 !important;
-    color: #c9d1e0 !important;
-    border: 1px solid #2a3147 !important;
-}
-
-/* Tabs */
-button[role="tab"] {
-    background-color: #0d0f14 !important;
-    color: #94a3b8 !important;
-}
-
-button[role="tab"][aria-selected="true"] {
-    color: #38bdf8 !important;
-    border-bottom: 2px solid #38bdf8 !important;
-}
-
-/* Metric containers */
-[data-testid="metric-container"] {
-    background-color: #161a24 !important;
-    border: 1px solid #2a3147 !important;
-    border-radius: 8px !important;
+    border-radius: 8px;
+    padding: 10px 16px;
+    margin-bottom: 12px;
+    font-size: 12px;
 }
 
 </style>
@@ -759,69 +692,69 @@ button[role="tab"][aria-selected="true"] {
 st.markdown("""
 <style>
 
-/* FORCE STREAMLIT ROOT DARK */
-:root {
-    --background-color: #0d0f14 !important;
-    --secondary-background-color: #161a24 !important;
-    --text-color: #c9d1e0 !important;
+/* Contract metric cards */
+.metric-card {
+    border: 1px solid rgba(120, 120, 120, 0.25);
+    background: var(--secondary-background-color);
 }
 
-/* Main app */
-.stApp {
-    background-color: #0d0f14 !important;
+/* Highlighted Case1 */
+.metric-card.hl {
+    border: 2px solid #3b82f6;
 }
 
-/* Block container */
-.main .block-container {
-    background-color: #0d0f14 !important;
+/* ICAP card */
+.metric-card.icap-card {
+    border: 1px solid #f59e0b;
 }
 
-/* Sidebar */
-[data-testid="stSidebar"] {
-    background-color: #10131b !important;
+/* Settlement card */
+.metric-card.settle {
+    border: 2px solid #34d399;
 }
 
-/* Sidebar inner */
-[data-testid="stSidebarContent"] {
-    background-color: #10131b !important;
+/* Section headers */
+.section-title {
+    border-bottom: 1px solid var(--secondary-background-color);
 }
 
-/* Header */
-[data-testid="stHeader"] {
-    background-color: #0d0f14 !important;
+/* Forward estimate box */
+.fwd-box {
+    border: 1px solid var(--secondary-background-color);
 }
 
-/* Toolbar */
-[data-testid="stToolbar"] {
-    background-color: #0d0f14 !important;
+/* Past month banner */
+.past-month-banner {
+    border: 1px solid #3730a3;
+}
+/* Contract price/rate cards */
+.metric-card {
+    border: 1px solid var(--secondary-background-color);
+    background-color: rgba(120, 120, 120, 0.08);
+    backdrop-filter: blur(4px);
+    border-radius: 8px;
 }
 
-/* Dataframe container */
-[data-testid="stDataFrame"] {
-    background-color: #161a24 !important;
+/* Highlighted Case1 */
+.metric-card.hl {
+    border: 2px solid #3b82f6;
+    background-color: rgba(59, 130, 246, 0.10);
 }
 
-/* Data editor container */
-[data-testid="stDataEditor"] {
-    background-color: #161a24 !important;
+/* ICAP */
+.metric-card.icap-card {
+    border: 1px solid #f59e0b;
+    background-color: rgba(245, 158, 11, 0.08);
 }
 
-/* Altair charts background */
-.vega-embed,
-.vega-embed summary,
-.js-plotly-plot,
-.plot-container {
-    background-color: #0d0f14 !important;
-}
-
-/* Tabs */
-.stTabs {
-    background-color: #0d0f14 !important;
+/* Settlement */
+.metric-card.settle {
+    border: 2px solid #34d399;
+    background-color: rgba(52, 211, 153, 0.08);
 }
 
 </style>
 """, unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE & DATA
