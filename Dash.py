@@ -19,6 +19,7 @@ import calendar, os, json
 import altair as alt
 import decimal as _dec
 from streamlit_local_storage import LocalStorage
+import streamlit_authenticator as stauth
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PATHS & CONSTANTS
@@ -550,6 +551,42 @@ def past_month_actual_chart(actual_df: pd.DataFrame,
 
 st.set_page_config(page_title="SOFR Dashboard", page_icon="📈", layout="wide")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+hashed_password = stauth.Hasher.hash("1234")
+
+credentials = {
+    "usernames": {
+        "1234": {
+            "name": "Authorized User",
+            "password": hashed_password
+        }
+    }
+}
+
+authenticator = stauth.Authenticate(
+    credentials,
+    "sofr_dashboard_cookie",
+    "abcdef",
+    cookie_expiry_days=7
+)
+
+authenticator.login(location="main")
+
+authentication_status = st.session_state.get("authentication_status")
+name = st.session_state.get("name")
+username = st.session_state.get("username")
+
+if authentication_status is False:
+    st.error("Invalid username/password")
+    st.stop()
+
+if authentication_status is None:
+    st.warning("Please log in")
+    st.stop()
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
@@ -649,6 +686,9 @@ file_status = (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 with st.sidebar:
+    authenticator.logout("Logout", "sidebar")
+    st.sidebar.success(f"Logged in as {username}")
+
     st.markdown("### 📂 Data")
     st.markdown(file_status)
 
