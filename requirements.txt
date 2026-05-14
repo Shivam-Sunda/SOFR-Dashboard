@@ -5,3 +5,5 @@ altair
 pyarrow
 openpyxl
 streamlit-local-storage
+streamlit-authenticator
+bcrypt
