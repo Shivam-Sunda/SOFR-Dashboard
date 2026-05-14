@@ -591,8 +591,12 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
 
-html, body, [class*="css"],
-[data-testid="stAppViewContainer"], [data-testid="stMain"], section.main {
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+section.main {
     font-family: 'IBM Plex Sans', sans-serif;
     background: #0d0f14 !important;
     color: #c9d1e0 !important;
@@ -747,6 +751,72 @@ button[role="tab"][aria-selected="true"] {
     background-color: #161a24 !important;
     border: 1px solid #2a3147 !important;
     border-radius: 8px !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+
+/* FORCE STREAMLIT ROOT DARK */
+:root {
+    --background-color: #0d0f14 !important;
+    --secondary-background-color: #161a24 !important;
+    --text-color: #c9d1e0 !important;
+}
+
+/* Main app */
+.stApp {
+    background-color: #0d0f14 !important;
+}
+
+/* Block container */
+.main .block-container {
+    background-color: #0d0f14 !important;
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #10131b !important;
+}
+
+/* Sidebar inner */
+[data-testid="stSidebarContent"] {
+    background-color: #10131b !important;
+}
+
+/* Header */
+[data-testid="stHeader"] {
+    background-color: #0d0f14 !important;
+}
+
+/* Toolbar */
+[data-testid="stToolbar"] {
+    background-color: #0d0f14 !important;
+}
+
+/* Dataframe container */
+[data-testid="stDataFrame"] {
+    background-color: #161a24 !important;
+}
+
+/* Data editor container */
+[data-testid="stDataEditor"] {
+    background-color: #161a24 !important;
+}
+
+/* Altair charts background */
+.vega-embed,
+.vega-embed summary,
+.js-plotly-plot,
+.plot-container {
+    background-color: #0d0f14 !important;
+}
+
+/* Tabs */
+.stTabs {
+    background-color: #0d0f14 !important;
 }
 
 </style>
