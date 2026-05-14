@@ -660,6 +660,99 @@ div[data-testid="stSidebar"] * { color: #c9d1e0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+
+/* ───────────────── FORCE DARK STREAMLIT COMPONENTS ───────────────── */
+
+/* Data editor / dataframe */
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"],
+[data-testid="stDataFrameResizable"] {
+    background-color: #161a24 !important;
+    border: 1px solid #2a3147 !important;
+    border-radius: 8px !important;
+}
+
+/* Glide grid */
+div[class*="glide-data-grid"] {
+    background-color: #161a24 !important;
+}
+
+/* Header cells */
+div[class*="glide-data-grid"] [role="columnheader"] {
+    background-color: #10131b !important;
+    color: #94a3b8 !important;
+    border-bottom: 1px solid #2a3147 !important;
+}
+
+/* Table cells */
+div[class*="glide-data-grid"] [role="gridcell"] {
+    background-color: #161a24 !important;
+    color: #c9d1e0 !important;
+    border-color: #2a3147 !important;
+}
+
+/* Editing input inside table */
+div[class*="glide-data-grid"] input {
+    background-color: #1b2130 !important;
+    color: #e2e8f0 !important;
+}
+
+/* Sidebar buttons */
+[data-testid="stSidebar"] .stButton > button {
+    background-color: #161a24 !important;
+    color: #c9d1e0 !important;
+    border: 1px solid #2a3147 !important;
+}
+
+/* Main buttons */
+.stButton > button {
+    background-color: #1b2130 !important;
+    color: #c9d1e0 !important;
+    border: 1px solid #2a3147 !important;
+    border-radius: 8px !important;
+}
+
+/* Inputs */
+input,
+textarea,
+[data-baseweb="input"],
+[data-baseweb="base-input"] {
+    background-color: #161a24 !important;
+    color: #c9d1e0 !important;
+    border: 1px solid #2a3147 !important;
+}
+
+/* Selectbox */
+[data-baseweb="select"] > div {
+    background-color: #161a24 !important;
+    color: #c9d1e0 !important;
+    border: 1px solid #2a3147 !important;
+}
+
+/* Tabs */
+button[role="tab"] {
+    background-color: #0d0f14 !important;
+    color: #94a3b8 !important;
+}
+
+button[role="tab"][aria-selected="true"] {
+    color: #38bdf8 !important;
+    border-bottom: 2px solid #38bdf8 !important;
+}
+
+/* Metric containers */
+[data-testid="metric-container"] {
+    background-color: #161a24 !important;
+    border: 1px solid #2a3147 !important;
+    border-radius: 8px !important;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE & DATA
 # ═══════════════════════════════════════════════════════════════════════════════
