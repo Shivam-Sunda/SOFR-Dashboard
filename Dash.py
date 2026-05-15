@@ -925,22 +925,7 @@ def render_table(contract: str, start: date, end_excl: date,
     locked_mask  = scaffold["_locked"].values
 
     for c in CASES:
-        display_df[c] = display_df[c].astype(object)
-
-    for c in CASES:
-        for i, locked in enumerate(locked_mask):
-            idx = display_df.index[i]
-            raw = display_df.at[idx, c]
-            if locked:
-                try:
-                    display_df.at[idx, c] = f"{float(raw):.2f}"
-                except (TypeError, ValueError):
-                    display_df.at[idx, c] = ""
-            else:
-                try:
-                    display_df.at[idx, c] = float(raw)
-                except (TypeError, ValueError):
-                    display_df.at[idx, c] = None
+        display_df[c] = pd.to_numeric(display_df[c], errors="coerce")
 
     today_positions = [
         i for i, d in enumerate(display_df["Date"])
