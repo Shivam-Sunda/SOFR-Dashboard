@@ -949,7 +949,6 @@ def render_table(contract: str, start: date, end_excl: date,
             unsafe_allow_html=True,
         )
 
-    all_locked = locked_mask.all()
     col_cfg = {
         "Date":        st.column_config.DateColumn("Date",          disabled=True),
         "Day":         st.column_config.TextColumn("Day",           disabled=True, width="small"),
@@ -958,19 +957,15 @@ def render_table(contract: str, start: date, end_excl: date,
         "GC Repo":     st.column_config.NumberColumn("GC Repo (%)", disabled=True, format="%.2f"),
         "ICAP":        st.column_config.NumberColumn("ICAP (%)",    disabled=True, format="%.2f"),
     }
-    if all_locked:
-        for c in CASES:
-            col_cfg[c] = st.column_config.TextColumn(c, disabled=True)
-        col_cfg["Notes"] = st.column_config.TextColumn("Notes", disabled=True)
-    else:
-        for c in CASES:
-            col_cfg[c] = st.column_config.NumberColumn(
-                c, format="%.2f", min_value=0.0, max_value=20.0)
-        col_cfg["Notes"] = st.column_config.TextColumn("Notes")
+    for c in CASES:
+        col_cfg[c] = st.column_config.NumberColumn(
+            c, format="%.2f", min_value=0.0, max_value=20.0)
+    col_cfg["Notes"] = st.column_config.TextColumn("Notes")
 
     edited = st.data_editor(
         display_df,
         column_config=col_cfg,
+        disabled=["Date", "Day", "Days", "Actual SOFR", "GC Repo", "ICAP"],
         use_container_width=True,
         hide_index=True,
         key=f"{key}_table",
@@ -992,7 +987,7 @@ def render_table(contract: str, start: date, end_excl: date,
 
         is_locked = bool(scaffold.loc[idx, "_locked"])
 
-        if not is_locked and d not in actual_dates:
+        if not is_locked:
             for c in CASES:
                 val = row[c]
                 try:
